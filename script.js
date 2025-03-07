@@ -21,6 +21,8 @@ class FlowChartApp {
         this.mouseY = 0;
         this.dragOffsetX = 0;
         this.dragOffsetY = 0;
+        this.gridSize = 20; // Grid size for snap functionality
+        this.lastNodePosition = { x: 100, y: 100 }; // Track last node position to prevent stacking
         
         // DOM elements
         this.canvas = document.getElementById('canvas');
@@ -102,9 +104,22 @@ class FlowChartApp {
         this.canvas.addEventListener('mousedown', (e) => this.handleCanvasMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleCanvasMouseMove(e));
         this.canvas.addEventListener('mouseup', () => this.handleCanvasMouseUp());
+        document.addEventListener('mouseup', () => this.handleCanvasMouseUp()); // Capture mouseup outside canvas too
         this.canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             return false;
+        });
+
+        // Add double-click listener for editing node text directly
+        this.canvas.addEventListener('dblclick', (e) => {
+            const target = e.target.closest('.flow-node');
+            if (target) {
+                const nodeId = target.dataset.id;
+                const nodeData = this.nodes.find(n => n.id === nodeId);
+                if (nodeData) {
+                    this.openTextEditModal(nodeId, nodeData.text, 'node');
+                }
+            }
         });
     }
     
@@ -113,13 +128,21 @@ class FlowChartApp {
         const nodeType = type || document.getElementById('node-type').value;
         const nodeText = text || 'New Node';
         
-        // If x and y are not provided, use the center of the viewport
+        // If x and y are not provided, use the last position plus an offset
         if (x === undefined || y === undefined) {
-            const canvasRect = this.canvas.getBoundingClientRect();
-            const canvasContainer = document.querySelector('.canvas-wrapper');
+            // Calculate position based on last node to prevent stacking
+            x = this.lastNodePosition.x + 160; // Horizontal spacing
+            y = this.lastNodePosition.y;
             
-            x = (canvasContainer.scrollLeft + canvasContainer.clientWidth / 2) / this.scale;
-            y = (canvasContainer.scrollTop + canvasContainer.clientHeight / 2) / this.scale;
+            // If we've moved too far right, start a new row
+            const maxX = 2000; // Maximum x position before wrapping
+            if (x > maxX) {
+                x = 100; // Reset to left side
+                y += 120; // Move down for a new row
+            }
+            
+            // Update last position for next node
+            this.lastNodePosition = { x, y };
         }
         
         const node = document.createElement('div');
@@ -423,6 +446,7 @@ class FlowChartApp {
             this.nextNodeId = 1;
             this.nextConnectionId = 1;
             this.selectedElement = null;
+            this.lastNodePosition = { x: 100, y: 100 }; // Reset last node position
             
             this.updatePropertiesPanel();
         }
@@ -509,6 +533,12 @@ class FlowChartApp {
                 this.nextNodeId = data.nextNodeId || this.nodes.length + 1;
                 this.nextConnectionId = data.nextConnectionId || this.connections.length + 1;
                 
+                // Update last node position for next additions
+                if (this.nodes.length > 0) {
+                    const lastNode = this.nodes[this.nodes.length - 1];
+                    this.lastNodePosition = { x: lastNode.x, y: lastNode.y };
+                }
+                
             } catch (error) {
                 console.error('Error importing JSON:', error);
                 alert('Error importing diagram. Invalid JSON format.');
@@ -521,7 +551,7 @@ class FlowChartApp {
     
     // Handle mouse down on canvas
     handleCanvasMouseDown(e) {
-        const target = e.target;
+        const target = e.target.closest('.flow-node') || e.target;
         
         // Right-click for context menu
         if (e.button === 2) {
@@ -616,14 +646,39 @@ class FlowChartApp {
             const canvasRect = this.canvas.getBoundingClientRect();
             
             // Calculate new position with scale
-            const x = (e.clientX - canvasRect.left - this.dragOffsetX) / this.scale;
-            const y = (e.clientY - canvasRect.top - this.dragOffsetY) / this.scale;
+            let x = (e.clientX - canvasRect.left - this.dragOffsetX) / this.scale;
+            let y = (e.clientY - canvasRect.top - this.dragOffsetY) / this.scale;
             
+            // Snap to grid if needed
+            if (this.gridSize > 0) {
+                x = Math.round(x / this.gridSize) * this.gridSize;
+                y = Math.round(y / this.gridSize) * this.gridSize;
+            }
+            
+            // Apply new position
             this.selectedElement.style.left = `${x}px`;
             this.selectedElement.style.top = `${y}px`;
             
+            // Update node data
+            const nodeId = this.selectedElement.dataset.id;
+            const nodeData = this.nodes.find(n => n.id === nodeId);
+            if (nodeData) {
+                nodeData.x = x;
+                nodeData.y = y;
+            }
+            
             // Update connections
             this.updateConnections();
+            
+            // Update properties panel if it's showing this node
+            if (this.selectedElement === this.selectedElement) {
+                const xInput = document.getElementById('prop-node-x');
+                const yInput = document.getElementById('prop-node-y');
+                if (xInput && yInput) {
+                    xInput.value = x;
+                    yInput.value = y;
+                }
+            }
         }
     }
     
