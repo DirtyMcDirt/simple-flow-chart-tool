@@ -141,7 +141,7 @@ body {
     text-align: center;
     cursor: move;
     user-select: none;
-    z-index: 1;
+    z-index: 2; /* Ensure nodes are above lines */
     transition: box-shadow 0.2s, transform 0.2s;
 }
 
@@ -153,7 +153,7 @@ body {
     outline: 3px solid var(--accent-color);
     box-shadow: var(--shadow-selected);
     transform: scale(1.02);
-    z-index: 2;
+    z-index: 3; /* Selected nodes above all */
 }
 
 .node-content {
@@ -212,7 +212,7 @@ body {
     background-color: #ffffff;
     border: 2px solid var(--text-color);
     border-radius: 50%;
-    z-index: 2;
+    z-index: 10; /* Ensure connectors are above nodes */
     cursor: pointer;
     transition: transform 0.2s, background-color 0.2s;
 }
@@ -220,9 +220,18 @@ body {
 .connector:hover {
     transform: scale(1.2);
     background-color: var(--accent-color);
+    border-color: var(--accent-color);
 }
 
-.connecting .connector {
+.connector-highlight {
+    transform: scale(1.3);
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.3);
+}
+
+.creating-connection .connector {
+    transform: scale(1.1);
     cursor: crosshair;
 }
 
@@ -232,11 +241,25 @@ body {
     fill: none;
     marker-end: url(#arrowhead);
     transition: stroke 0.2s;
+    pointer-events: stroke; /* Make lines clickable */
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .connection-line:hover {
     stroke: var(--accent-color);
     stroke-width: 3;
+}
+
+.connection-line.selected {
+    stroke: var(--accent-color);
+    stroke-width: 3;
+    stroke-dasharray: none;
+}
+
+.connection-line.temp-connection {
+    stroke: var(--accent-color);
+    stroke-opacity: 0.7;
 }
 
 .connection-label {
@@ -248,6 +271,7 @@ body {
     cursor: pointer;
     box-shadow: var(--shadow);
     transition: transform 0.2s, box-shadow 0.2s;
+    z-index: 5; /* Ensure labels are above lines */
 }
 
 .connection-label:hover {
@@ -440,15 +464,14 @@ body {
     }
 }
 
-/* Animations and transitions */
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
+/* Connection feedback during creation */
+.creating-connection .flow-node:not(.source-node):hover {
+    outline: 2px dashed var(--accent-color);
 }
 
-.flow-node.new {
-    animation: pulse 0.5s ease-in-out;
+/* Visual feedback for draggable elements */
+.flow-node:active {
+    cursor: grabbing;
 }
 
 /* Empty state guidance */
@@ -496,4 +519,49 @@ body {
     font-style: italic;
     text-align: center;
     padding: 20px 0;
+}
+
+/* Better canvas indicators */
+#canvas {
+    position: relative;
+}
+
+#canvas::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Animations */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.connector-highlight {
+    animation: pulse 1s infinite;
+}
+
+/* Fix z-index ordering */
+.flow-node {
+    position: relative;
+    z-index: 2;
+}
+
+.connector {
+    z-index: 10;
+}
+
+.connection-line {
+    z-index: 1;
+}
+
+.connection-label {
+    z-index: 5;
 }
