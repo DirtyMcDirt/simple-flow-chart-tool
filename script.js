@@ -528,6 +528,7 @@ class FlowChartApp {
         path.dataset.sourcePosition = sourcePosition;
         path.dataset.targetPosition = targetPosition;
         path.dataset.id = this.nextConnectionId++;
+        path.style.pointerEvents = 'stroke'; // Make path clickable
         
         // Calculate curve based on connector positions
         const pathData = this.calculateConnectionPath(
@@ -536,7 +537,6 @@ class FlowChartApp {
         );
         
         path.setAttribute('d', pathData);
-        path.style.pointerEvents = 'auto'; // Make path selectable
         
         // Add click event for selecting the path
         path.addEventListener('click', (e) => {
