@@ -24,7 +24,6 @@
             
             <div class="tool-section">
                 <h3>Edit</h3>
-                <button id="connect-mode" class="tool-button">Connect Nodes</button>
                 <button id="delete-selected" class="tool-button">Delete Selected</button>
                 <button id="clear-all" class="tool-button">Clear All</button>
             </div>
@@ -36,6 +35,16 @@
                 <button id="import-json" class="tool-button">Load from JSON</button>
                 <input type="file" id="import-file" accept=".json" style="display: none;">
             </div>
+            
+            <div class="tool-section">
+                <h3>Help</h3>
+                <div class="help-text">
+                    <p><strong>Create connections:</strong> Drag from white dots on node edges</p>
+                    <p><strong>Edit text:</strong> Double-click any node or label</p>
+                    <p><strong>Move nodes:</strong> Drag from center of node</p>
+                    <p><strong>Delete:</strong> Select + press Delete key</p>
+                </div>
+            </div>
         </div>
         
         <div class="canvas-container">
@@ -45,7 +54,13 @@
                 <button id="zoom-reset">Reset</button>
             </div>
             <div class="canvas-wrapper">
-                <div id="canvas"></div>
+                <div id="canvas">
+                    <!-- Canvas content is added by JavaScript -->
+                    <div class="canvas-empty-state">
+                        <h3>Start Your Flow Diagram</h3>
+                        <p>Click "Add Node" or drag from connector points to create connections</p>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -70,17 +85,6 @@
             <li data-action="edit-label">Edit Label</li>
             <li data-action="delete">Delete Connection</li>
         </ul>
-    </div>
-
-    <div id="text-edit-modal" class="modal">
-        <div class="modal-content">
-            <h3 id="modal-title">Edit Text</h3>
-            <textarea id="text-input"></textarea>
-            <div class="modal-buttons">
-                <button id="save-text">Save</button>
-                <button id="cancel-edit">Cancel</button>
-            </div>
-        </div>
     </div>
 
     <script src="script.js"></script>
