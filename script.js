@@ -23,6 +23,7 @@ class FlowChartApp {
         this.dragOffsetY = 0;
         this.gridSize = 20; // Grid size for snap functionality
         this.lastNodePosition = { x: 100, y: 100 }; // Track last node position to prevent stacking
+        this.isEditing = false; // Flag to track if we're currently editing text
         
         // DOM elements
         this.canvas = document.getElementById('canvas');
@@ -30,8 +31,6 @@ class FlowChartApp {
         this.propertiesContent = document.getElementById('properties-content');
         this.nodeContextMenu = document.getElementById('node-context-menu');
         this.connectionContextMenu = document.getElementById('connection-context-menu');
-        this.textEditModal = document.getElementById('text-edit-modal');
-        this.textInput = document.getElementById('text-input');
         
         // Setup
         this.setupCanvas();
@@ -92,13 +91,13 @@ class FlowChartApp {
         document.getElementById('zoom-reset').addEventListener('click', () => this.resetZoom());
         
         // Context menu interactions
-        document.addEventListener('click', () => this.hideContextMenus());
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.context-menu')) {
+                this.hideContextMenus();
+            }
+        });
         this.nodeContextMenu.addEventListener('click', (e) => this.handleNodeContextMenu(e));
         this.connectionContextMenu.addEventListener('click', (e) => this.handleConnectionContextMenu(e));
-        
-        // Text edit modal
-        document.getElementById('save-text').addEventListener('click', () => this.saveTextEdit());
-        document.getElementById('cancel-edit').addEventListener('click', () => this.closeTextEditModal());
         
         // Canvas interactions
         this.canvas.addEventListener('mousedown', (e) => this.handleCanvasMouseDown(e));
@@ -110,17 +109,131 @@ class FlowChartApp {
             return false;
         });
 
-        // Add double-click listener for editing node text directly
+        // Add double-click listener for editing node text directly inline
         this.canvas.addEventListener('dblclick', (e) => {
-            const target = e.target.closest('.flow-node');
-            if (target) {
-                const nodeId = target.dataset.id;
-                const nodeData = this.nodes.find(n => n.id === nodeId);
-                if (nodeData) {
-                    this.openTextEditModal(nodeId, nodeData.text, 'node');
+            if (this.isEditing) return; // Prevent nested editing
+            
+            const nodeContent = e.target.closest('.node-content');
+            if (nodeContent) {
+                const nodeElement = nodeContent.closest('.flow-node');
+                if (nodeElement) {
+                    this.makeNodeContentEditable(nodeElement, nodeContent);
                 }
             }
         });
+        
+        // Global click handler to handle clicks outside the editing area
+        document.addEventListener('click', (e) => {
+            if (this.isEditing && !e.target.classList.contains('node-content-editable')) {
+                this.finishEditing();
+            }
+        });
+        
+        // Handle keyboard events for the entire document
+        document.addEventListener('keydown', (e) => {
+            if (this.isEditing && e.key === 'Enter') {
+                e.preventDefault();
+                this.finishEditing();
+            }
+            
+            if (this.isEditing && e.key === 'Escape') {
+                e.preventDefault();
+                this.cancelEditing();
+            }
+            
+            // Delete key for selected elements
+            if (!this.isEditing && this.selectedElement && e.key === 'Delete') {
+                this.deleteSelected();
+            }
+        });
+    }
+    
+    // Make node content editable inline
+    makeNodeContentEditable(nodeElement, nodeContent) {
+        // Store original text for cancellation
+        const originalText = nodeContent.textContent;
+        nodeContent.dataset.originalText = originalText;
+        
+        // Make content editable
+        nodeContent.contentEditable = true;
+        nodeContent.classList.add('node-content-editable');
+        
+        // Setup selection and focus
+        this.isEditing = true;
+        this.editingNodeId = nodeElement.dataset.id;
+        
+        // Focus and select all text
+        nodeContent.focus();
+        
+        // Create a range to select all the text
+        const range = document.createRange();
+        range.selectNodeContents(nodeContent);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        
+        // Prevent node dragging while editing
+        nodeElement.style.pointerEvents = 'none';
+        nodeContent.style.pointerEvents = 'auto';
+    }
+    
+    // Finish editing node content
+    finishEditing() {
+        if (!this.isEditing) return;
+        
+        const editableContent = document.querySelector('.node-content-editable');
+        if (!editableContent) return;
+        
+        const newText = editableContent.textContent.trim();
+        const nodeElement = editableContent.closest('.flow-node');
+        
+        if (nodeElement) {
+            const nodeId = nodeElement.dataset.id;
+            const nodeData = this.nodes.find(n => n.id === nodeId);
+            
+            if (nodeData && newText) {
+                nodeData.text = newText;
+                
+                // Restore styles and attributes
+                editableContent.contentEditable = false;
+                editableContent.classList.remove('node-content-editable');
+                nodeElement.style.pointerEvents = 'auto';
+                
+                // Update properties panel if this node is selected
+                if (this.selectedElement === nodeElement) {
+                    const textInput = document.getElementById('prop-node-text');
+                    if (textInput) {
+                        textInput.value = newText;
+                    }
+                }
+            }
+        }
+        
+        this.isEditing = false;
+        this.editingNodeId = null;
+    }
+    
+    // Cancel editing and restore original text
+    cancelEditing() {
+        if (!this.isEditing) return;
+        
+        const editableContent = document.querySelector('.node-content-editable');
+        if (!editableContent) return;
+        
+        // Restore original text
+        const originalText = editableContent.dataset.originalText || '';
+        editableContent.textContent = originalText;
+        
+        // Restore styles and attributes
+        editableContent.contentEditable = false;
+        editableContent.classList.remove('node-content-editable');
+        const nodeElement = editableContent.closest('.flow-node');
+        if (nodeElement) {
+            nodeElement.style.pointerEvents = 'auto';
+        }
+        
+        this.isEditing = false;
+        this.editingNodeId = null;
     }
     
     // Add a new node to the canvas
@@ -209,6 +322,13 @@ class FlowChartApp {
         });
         
         this.canvas.appendChild(node);
+
+        // Select the newly created node
+        this.deselectAll();
+        node.classList.add('selected');
+        this.selectedElement = node;
+        this.updatePropertiesPanel();
+        
         return node;
     }
     
@@ -321,7 +441,65 @@ class FlowChartApp {
         // Add event listener for editing the label
         label.addEventListener('dblclick', (e) => {
             e.stopPropagation();
-            this.openTextEditModal(connectionId, text, 'connection');
+            if (this.isEditing) return;
+            
+            // Make the label directly editable
+            this.isEditing = true;
+            label.contentEditable = true;
+            label.classList.add('connection-label-editable');
+            label.focus();
+            
+            // Select all text
+            const range = document.createRange();
+            range.selectNodeContents(label);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            
+            // Store original text for cancellation
+            label.dataset.originalText = text;
+            
+            // Set up event listeners for saving
+            const saveEdit = () => {
+                if (!label.isConnected) return;
+                
+                const newText = label.textContent.trim();
+                label.contentEditable = false;
+                label.classList.remove('connection-label-editable');
+                
+                // Update connection data
+                const connectionData = this.connections.find(c => c.id === connectionId);
+                if (connectionData) {
+                    connectionData.label = newText;
+                }
+                
+                this.isEditing = false;
+                
+                // Update properties panel if this connection is selected
+                if (this.selectedElement && this.selectedElement.dataset.id === connectionId) {
+                    const labelInput = document.getElementById('prop-connection-label');
+                    if (labelInput) {
+                        labelInput.value = newText;
+                    }
+                }
+            };
+            
+            // Save on blur
+            label.addEventListener('blur', saveEdit, { once: true });
+            
+            // Save on Enter, cancel on Escape
+            label.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    saveEdit();
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    label.textContent = label.dataset.originalText || '';
+                    label.contentEditable = false;
+                    label.classList.remove('connection-label-editable');
+                    this.isEditing = false;
+                }
+            });
         });
         
         this.canvas.appendChild(label);
@@ -551,12 +729,16 @@ class FlowChartApp {
     
     // Handle mouse down on canvas
     handleCanvasMouseDown(e) {
+        // Skip if we're editing text
+        if (this.isEditing) return;
+        
         const target = e.target.closest('.flow-node') || e.target;
         
         // Right-click for context menu
         if (e.button === 2) {
-            if (target.classList.contains('flow-node')) {
-                this.showNodeContextMenu(e, target);
+            if (target.classList.contains('flow-node') || target.closest('.flow-node')) {
+                const nodeElement = target.closest('.flow-node') || target;
+                this.showNodeContextMenu(e, nodeElement);
             } else if (target.classList.contains('connection-label')) {
                 const connectionId = target.dataset.connectionId;
                 this.showConnectionContextMenu(e, connectionId);
@@ -567,10 +749,12 @@ class FlowChartApp {
         // Left-click
         if (e.button === 0) {
             // Handle node selection and dragging
-            if (target.classList.contains('flow-node')) {
+            if (target.classList.contains('flow-node') || target.closest('.flow-node')) {
+                const nodeElement = target.closest('.flow-node') || target;
+                
                 // If in connection mode, start a connection
                 if (this.isConnecting) {
-                    this.sourceNode = target.dataset.id;
+                    this.sourceNode = nodeElement.dataset.id;
                     
                     // Create a temporary line for visual feedback
                     this.connectingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -578,15 +762,15 @@ class FlowChartApp {
                     this.connectingLine.style.strokeDasharray = '5,5';
                     this.svg.appendChild(this.connectingLine);
                 } else {
-                    // Regular node selection
+                    // Regular node selection - always select the node when clicked
                     this.deselectAll();
-                    target.classList.add('selected');
-                    this.selectedElement = target;
+                    nodeElement.classList.add('selected');
+                    this.selectedElement = nodeElement;
                     this.updatePropertiesPanel();
                     
                     // Prepare for dragging
                     this.isDragging = true;
-                    const rect = target.getBoundingClientRect();
+                    const rect = nodeElement.getBoundingClientRect();
                     this.dragOffsetX = e.clientX - rect.left;
                     this.dragOffsetY = e.clientY - rect.top;
                 }
@@ -733,9 +917,12 @@ class FlowChartApp {
         
         switch (action) {
             case 'edit':
-                const nodeData = this.nodes.find(n => n.id === nodeId);
-                if (nodeData) {
-                    this.openTextEditModal(nodeId, nodeData.text, 'node');
+                const nodeElement = this.findNodeElement(nodeId);
+                if (nodeElement) {
+                    const nodeContent = nodeElement.querySelector('.node-content');
+                    if (nodeContent) {
+                        this.makeNodeContentEditable(nodeElement, nodeContent);
+                    }
                 }
                 break;
                 
@@ -767,9 +954,15 @@ class FlowChartApp {
         
         switch (action) {
             case 'edit-label':
-                const connectionData = this.connections.find(c => c.id === connectionId);
-                if (connectionData) {
-                    this.openTextEditModal(connectionId, connectionData.label || '', 'connection');
+                const label = document.querySelector(`.connection-label[data-connection-id="${connectionId}"]`);
+                if (label) {
+                    // Trigger the inline editing logic by simulating a double-click
+                    const dblClickEvent = new MouseEvent('dblclick', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                    });
+                    label.dispatchEvent(dblClickEvent);
                 }
                 break;
                 
@@ -785,59 +978,6 @@ class FlowChartApp {
     hideContextMenus() {
         this.nodeContextMenu.style.display = 'none';
         this.connectionContextMenu.style.display = 'none';
-    }
-    
-    // Open text edit modal
-    openTextEditModal(id, text, type) {
-        this.textEditModal.style.display = 'flex';
-        this.textInput.value = text;
-        this.textInput.dataset.id = id;
-        this.textInput.dataset.type = type;
-        document.getElementById('modal-title').textContent = type === 'node' ? 'Edit Node Text' : 'Edit Connection Label';
-        this.textInput.focus();
-    }
-    
-    // Save text edit
-    saveTextEdit() {
-        const id = this.textInput.dataset.id;
-        const text = this.textInput.value;
-        const type = this.textInput.dataset.type;
-        
-        if (type === 'node') {
-            const nodeData = this.nodes.find(n => n.id === id);
-            if (nodeData) {
-                nodeData.text = text;
-                
-                const nodeElement = this.findNodeElement(id);
-                if (nodeElement) {
-                    const nodeContent = nodeElement.querySelector('.node-content');
-                    if (nodeContent) {
-                        nodeContent.textContent = text;
-                    }
-                }
-            }
-        } else if (type === 'connection') {
-            const connectionData = this.connections.find(c => c.id === id);
-            if (connectionData) {
-                connectionData.label = text;
-                
-                // Update or create label
-                const labelElement = document.querySelector(`.connection-label[data-connection-id="${id}"]`);
-                if (labelElement) {
-                    labelElement.textContent = text;
-                } else {
-                    this.addConnectionLabel(id, text);
-                }
-            }
-        }
-        
-        this.closeTextEditModal();
-        this.updatePropertiesPanel();
-    }
-    
-    // Close text edit modal
-    closeTextEditModal() {
-        this.textEditModal.style.display = 'none';
     }
     
     // Update properties panel with selected element data
