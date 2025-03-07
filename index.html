@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Flow Chart Tool</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <div class="toolbar">
+            <div class="tool-section">
+                <h3>Add Elements</h3>
+                <button id="add-node" class="tool-button">Add Node</button>
+                <div class="node-type-container">
+                    <select id="node-type">
+                        <option value="process">Process</option>
+                        <option value="decision">Decision</option>
+                        <option value="start">Start/End</option>
+                        <option value="input">Input/Output</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="tool-section">
+                <h3>Edit</h3>
+                <button id="connect-mode" class="tool-button">Connect Nodes</button>
+                <button id="delete-selected" class="tool-button">Delete Selected</button>
+                <button id="clear-all" class="tool-button">Clear All</button>
+            </div>
+            
+            <div class="tool-section">
+                <h3>Export</h3>
+                <button id="export-png" class="tool-button">Export as PNG</button>
+                <button id="export-json" class="tool-button">Save as JSON</button>
+                <button id="import-json" class="tool-button">Load from JSON</button>
+                <input type="file" id="import-file" accept=".json" style="display: none;">
+            </div>
+        </div>
+        
+        <div class="canvas-container">
+            <div id="zoom-controls">
+                <button id="zoom-in">+</button>
+                <button id="zoom-out">-</button>
+                <button id="zoom-reset">Reset</button>
+            </div>
+            <div class="canvas-wrapper">
+                <div id="canvas"></div>
+            </div>
+        </div>
+        
+        <div id="properties-panel" class="properties-panel">
+            <h3>Properties</h3>
+            <div id="properties-content">
+                <p class="no-selection">Select an element to edit its properties</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="node-context-menu" class="context-menu">
+        <ul>
+            <li data-action="edit">Edit Text</li>
+            <li data-action="delete">Delete</li>
+            <li data-action="start-connection">Connect to...</li>
+        </ul>
+    </div>
+
+    <div id="connection-context-menu" class="context-menu">
+        <ul>
+            <li data-action="edit-label">Edit Label</li>
+            <li data-action="delete">Delete Connection</li>
+        </ul>
+    </div>
+
+    <div id="text-edit-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="modal-title">Edit Text</h3>
+            <textarea id="text-input"></textarea>
+            <div class="modal-buttons">
+                <button id="save-text">Save</button>
+                <button id="cancel-edit">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
