@@ -35,6 +35,9 @@ class FlowChartApp {
         this.setupCanvas();
         this.setupEventListeners();
         this.createSVGDefinitions();
+        
+        // Show empty state message if no nodes exist
+        this.updateEmptyState();
     }
     
     // Initialize canvas with SVG elements
@@ -49,6 +52,8 @@ class FlowChartApp {
         this.svg.style.pointerEvents = 'none';
         this.svg.style.zIndex = '1'; // Ensure SVG is above nodes
         this.canvas.appendChild(this.svg);
+        
+        console.log("Canvas setup complete");
     }
     
     // Create SVG definitions (like arrowheads)
@@ -76,7 +81,16 @@ class FlowChartApp {
     // Setup all event listeners
     setupEventListeners() {
         // Toolbar buttons
-        document.getElementById('add-node').addEventListener('click', () => this.addNode());
+        const addNodeButton = document.getElementById('add-node');
+        if (addNodeButton) {
+            addNodeButton.addEventListener('click', () => {
+                console.log("Add Node button clicked");
+                this.addNode();
+            });
+        } else {
+            console.error("Add Node button not found");
+        }
+        
         document.getElementById('delete-selected').addEventListener('click', () => this.deleteSelected());
         document.getElementById('clear-all').addEventListener('click', () => this.clearAll());
         document.getElementById('export-png').addEventListener('click', () => this.exportAsPNG());
@@ -152,6 +166,20 @@ class FlowChartApp {
                 this.deleteSelected();
             }
         });
+        
+        console.log("Event listeners setup complete");
+    }
+    
+    // Show/hide empty state message
+    updateEmptyState() {
+        const emptyStateElement = document.querySelector('.canvas-empty-state');
+        if (emptyStateElement) {
+            if (this.nodes.length === 0) {
+                emptyStateElement.style.display = 'block';
+            } else {
+                emptyStateElement.style.display = 'none';
+            }
+        }
     }
     
     // Make node content editable inline
@@ -244,7 +272,11 @@ class FlowChartApp {
     
     // Add a new node to the canvas
     addNode(x, y, type, text) {
-        const nodeType = type || document.getElementById('node-type').value;
+        console.log("addNode called", { x, y, type, text });
+        
+        // Get the selected node type from the dropdown
+        const nodeTypeSelect = document.getElementById('node-type');
+        const nodeType = type || (nodeTypeSelect ? nodeTypeSelect.value : 'process');
         const nodeText = text || 'New Node';
         
         // If x and y are not provided, use the last position plus an offset
@@ -263,6 +295,8 @@ class FlowChartApp {
             // Update last position for next node
             this.lastNodePosition = { x, y };
         }
+        
+        console.log("Creating node at position", { x, y });
         
         const node = document.createElement('div');
         node.className = `flow-node node-${nodeType}`;
@@ -333,12 +367,19 @@ class FlowChartApp {
         this.selectedElement = node;
         this.updatePropertiesPanel();
         
+        // Hide empty state message since we now have a node
+        this.updateEmptyState();
+        
+        console.log("Node created with ID", node.dataset.id);
+        
         return node;
     }
     
     // Start creating a connection by dragging from a connector
     startConnectionDrag(nodeId, position, event) {
         if (this.isEditing) return; // Don't create connections while editing text
+        
+        console.log("Start connection drag", { nodeId, position });
         
         this.isCreatingConnection = true;
         this.connectionSource = nodeId;
@@ -455,6 +496,8 @@ class FlowChartApp {
     endConnectionDrag(event) {
         if (!this.isCreatingConnection) return;
         
+        console.log("End connection drag");
+        
         // If the mouse is over a connector, create a permanent connection
         const highlightedConnector = document.querySelector('.connector-highlight');
         if (highlightedConnector && event) {
@@ -462,6 +505,13 @@ class FlowChartApp {
             if (targetNode && targetNode.dataset.id !== this.connectionSource) {
                 const targetId = targetNode.dataset.id;
                 const targetPosition = highlightedConnector.dataset.position;
+                
+                console.log("Creating connection", { 
+                    source: this.connectionSource, 
+                    target: targetId,
+                    sourcePos: this.connectionSourcePosition,
+                    targetPos: targetPosition
+                });
                 
                 this.createConnection(
                     this.connectionSource, 
@@ -775,6 +825,7 @@ class FlowChartApp {
         
         this.selectedElement = null;
         this.updatePropertiesPanel();
+        this.updateEmptyState();
     }
     
     // Delete a node and its connections
@@ -800,6 +851,9 @@ class FlowChartApp {
         
         // Remove from nodes array
         this.nodes = this.nodes.filter(node => node.id !== nodeId);
+        
+        // Update empty state
+        this.updateEmptyState();
     }
     
     // Delete a connection
@@ -843,6 +897,7 @@ class FlowChartApp {
             this.lastNodePosition = { x: 100, y: 100 }; // Reset last node position
             
             this.updatePropertiesPanel();
+            this.updateEmptyState();
         }
     }
     
@@ -941,6 +996,9 @@ class FlowChartApp {
                     const lastNode = this.nodes[this.nodes.length - 1];
                     this.lastNodePosition = { x: lastNode.x, y: lastNode.y };
                 }
+                
+                // Update empty state
+                this.updateEmptyState();
                 
             } catch (error) {
                 console.error('Error importing JSON:', error);
@@ -1365,6 +1423,8 @@ class FlowChartApp {
 
 // Initialize the application when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
+    console.log("DOM loaded, initializing FlowChartApp");
+    
     // Check for html2canvas for export capability
     if (typeof html2canvas === 'undefined') {
         console.warn('html2canvas library not detected. PNG export will not work.');
@@ -1374,5 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.head.appendChild(script);
     }
     
+    // Create app instance
     window.flowChartApp = new FlowChartApp();
+    console.log("FlowChartApp initialized");
 });
