@@ -13,17 +13,16 @@ class FlowChartApp {
         this.nextConnectionId = 1;
         this.selectedElement = null;
         this.isDragging = false;
-        this.isConnecting = false;
-        this.sourceNode = null;
-        this.connectingLine = null;
-        this.scale = 1;
-        this.mouseX = 0;
-        this.mouseY = 0;
-        this.dragOffsetX = 0;
-        this.dragOffsetY = 0;
-        this.gridSize = 20; // Grid size for snap functionality
-        this.lastNodePosition = { x: 100, y: 100 }; // Track last node position to prevent stacking
         this.isEditing = false; // Flag to track if we're currently editing text
+        this.lastNodePosition = { x: 100, y: 100 }; // Track last node position to prevent stacking
+        this.gridSize = 20; // Grid size for snap functionality
+        this.scale = 1;
+        
+        // Connection drag state
+        this.isCreatingConnection = false;
+        this.connectionSource = null;
+        this.connectionSourcePosition = null;
+        this.tempConnection = null;
         
         // DOM elements
         this.canvas = document.getElementById('canvas');
@@ -48,6 +47,7 @@ class FlowChartApp {
         this.svg.style.top = '0';
         this.svg.style.left = '0';
         this.svg.style.pointerEvents = 'none';
+        this.svg.style.zIndex = '1'; // Ensure SVG is above nodes
         this.canvas.appendChild(this.svg);
     }
     
@@ -77,7 +77,6 @@ class FlowChartApp {
     setupEventListeners() {
         // Toolbar buttons
         document.getElementById('add-node').addEventListener('click', () => this.addNode());
-        document.getElementById('connect-mode').addEventListener('click', () => this.toggleConnectionMode());
         document.getElementById('delete-selected').addEventListener('click', () => this.deleteSelected());
         document.getElementById('clear-all').addEventListener('click', () => this.clearAll());
         document.getElementById('export-png').addEventListener('click', () => this.exportAsPNG());
@@ -102,8 +101,15 @@ class FlowChartApp {
         // Canvas interactions
         this.canvas.addEventListener('mousedown', (e) => this.handleCanvasMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleCanvasMouseMove(e));
-        this.canvas.addEventListener('mouseup', () => this.handleCanvasMouseUp());
-        document.addEventListener('mouseup', () => this.handleCanvasMouseUp()); // Capture mouseup outside canvas too
+        this.canvas.addEventListener('mouseup', (e) => this.handleCanvasMouseUp(e));
+        document.addEventListener('mouseup', (e) => {
+            // When mouse is released outside the canvas, stop any dragging
+            if (!e.target.closest('#canvas')) {
+                this.isDragging = false;
+                this.endConnectionDrag();
+            }
+        });
+        
         this.canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             return false;
@@ -301,12 +307,10 @@ class FlowChartApp {
                     break;
             }
             
-            // Add connector event listeners
+            // Add connector event listeners for drag-and-drop connection creation
             connector.addEventListener('mousedown', (e) => {
-                if (this.isConnecting) {
-                    e.stopPropagation();
-                    this.createConnection(this.sourceNode, node.dataset.id, e.target.dataset.position);
-                }
+                e.stopPropagation(); // Prevent node dragging when clicking connector
+                this.startConnectionDrag(node.dataset.id, pos, e);
             });
             
             node.appendChild(connector);
@@ -332,29 +336,166 @@ class FlowChartApp {
         return node;
     }
     
-    // Toggle connection mode
-    toggleConnectionMode() {
-        this.isConnecting = !this.isConnecting;
-        const connectButton = document.getElementById('connect-mode');
+    // Start creating a connection by dragging from a connector
+    startConnectionDrag(nodeId, position, event) {
+        if (this.isEditing) return; // Don't create connections while editing text
         
-        if (this.isConnecting) {
-            connectButton.style.backgroundColor = '#e74c3c';
-            this.canvas.classList.add('connecting');
-            this.deselectAll();
-        } else {
-            connectButton.style.backgroundColor = '';
-            this.canvas.classList.remove('connecting');
-            this.sourceNode = null;
+        this.isCreatingConnection = true;
+        this.connectionSource = nodeId;
+        this.connectionSourcePosition = position;
+        
+        // Create a temporary visual connection line
+        this.tempConnection = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        this.tempConnection.setAttribute('class', 'connection-line temp-connection');
+        this.tempConnection.style.strokeDasharray = '5,5';
+        this.tempConnection.style.pointerEvents = 'none';
+        this.svg.appendChild(this.tempConnection);
+        
+        // Get the starting point coordinates from the connector
+        const sourceNode = this.findNodeElement(nodeId);
+        const sourceConnector = sourceNode.querySelector(`.connector[data-position="${position}"]`);
+        const sourceRect = sourceConnector.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+        
+        // Calculate the starting coordinates
+        this.connectionStartX = (sourceRect.left + sourceRect.width / 2 - canvasRect.left) / this.scale;
+        this.connectionStartY = (sourceRect.top + sourceRect.height / 2 - canvasRect.top) / this.scale;
+        
+        // Initial line drawn to cursor position
+        const mouseX = (event.clientX - canvasRect.left) / this.scale;
+        const mouseY = (event.clientY - canvasRect.top) / this.scale;
+        
+        this.updateTempConnection(mouseX, mouseY);
+        
+        // Add a class to the canvas to show we're in connection creation mode
+        this.canvas.classList.add('creating-connection');
+    }
+    
+    // Update the temporary connection line during dragging
+    updateTempConnection(endX, endY) {
+        if (!this.isCreatingConnection || !this.tempConnection) return;
+        
+        // Draw a curved path from start to current mouse position
+        const dx = Math.abs(endX - this.connectionStartX);
+        const dy = Math.abs(endY - this.connectionStartY);
+        const controlOffset = Math.min(100, Math.max(50, Math.min(dx, dy) * 0.5));
+        
+        let sourceControlX, sourceControlY, targetControlX, targetControlY;
+        
+        // Adjust control points based on source position
+        switch (this.connectionSourcePosition) {
+            case 'right':
+                sourceControlX = this.connectionStartX + controlOffset;
+                sourceControlY = this.connectionStartY;
+                break;
+            case 'left':
+                sourceControlX = this.connectionStartX - controlOffset;
+                sourceControlY = this.connectionStartY;
+                break;
+            case 'bottom':
+                sourceControlX = this.connectionStartX;
+                sourceControlY = this.connectionStartY + controlOffset;
+                break;
+            case 'top':
+                sourceControlX = this.connectionStartX;
+                sourceControlY = this.connectionStartY - controlOffset;
+                break;
+            default:
+                sourceControlX = this.connectionStartX + controlOffset;
+                sourceControlY = this.connectionStartY;
+        }
+        
+        // Simple target control point
+        targetControlX = endX - (endX - this.connectionStartX) * 0.5;
+        targetControlY = endY - (endY - this.connectionStartY) * 0.5;
+        
+        const pathData = `M ${this.connectionStartX},${this.connectionStartY} 
+                         C ${sourceControlX},${sourceControlY} 
+                           ${targetControlX},${targetControlY} 
+                           ${endX},${endY}`;
+        
+        this.tempConnection.setAttribute('d', pathData);
+        
+        // Highlight potential target connectors
+        this.highlightPotentialTargets(endX, endY);
+    }
+    
+    // Highlight potential target connectors when hovering near them
+    highlightPotentialTargets(x, y) {
+        // Remove any existing highlights
+        document.querySelectorAll('.connector-highlight').forEach(connector => {
+            connector.classList.remove('connector-highlight');
+        });
+        
+        // Find connector near cursor
+        const connectors = document.querySelectorAll('.connector');
+        const radius = 20; // Distance in pixels to trigger highlight
+        
+        connectors.forEach(connector => {
+            const nodeElement = connector.closest('.flow-node');
+            if (nodeElement && nodeElement.dataset.id === this.connectionSource) {
+                return; // Skip connectors on the source node
+            }
             
-            if (this.connectingLine) {
-                this.connectingLine.remove();
-                this.connectingLine = null;
+            const rect = connector.getBoundingClientRect();
+            const canvasRect = this.canvas.getBoundingClientRect();
+            
+            const connectorX = (rect.left + rect.width / 2 - canvasRect.left) / this.scale;
+            const connectorY = (rect.top + rect.height / 2 - canvasRect.top) / this.scale;
+            
+            const distance = Math.sqrt(Math.pow(connectorX - x, 2) + Math.pow(connectorY - y, 2));
+            
+            if (distance <= radius) {
+                connector.classList.add('connector-highlight');
+            }
+        });
+    }
+    
+    // End connection creation and establish connection if over a valid target
+    endConnectionDrag(event) {
+        if (!this.isCreatingConnection) return;
+        
+        // If the mouse is over a connector, create a permanent connection
+        const highlightedConnector = document.querySelector('.connector-highlight');
+        if (highlightedConnector && event) {
+            const targetNode = highlightedConnector.closest('.flow-node');
+            if (targetNode && targetNode.dataset.id !== this.connectionSource) {
+                const targetId = targetNode.dataset.id;
+                const targetPosition = highlightedConnector.dataset.position;
+                
+                this.createConnection(
+                    this.connectionSource, 
+                    targetId, 
+                    this.connectionSourcePosition, 
+                    targetPosition
+                );
             }
         }
+        
+        // Remove temporary visual elements
+        if (this.tempConnection) {
+            this.tempConnection.remove();
+            this.tempConnection = null;
+        }
+        
+        // Remove highlights
+        document.querySelectorAll('.connector-highlight').forEach(connector => {
+            connector.classList.remove('connector-highlight');
+        });
+        
+        // Reset connection state
+        this.isCreatingConnection = false;
+        this.connectionSource = null;
+        this.connectionSourcePosition = null;
+        this.connectionStartX = null;
+        this.connectionStartY = null;
+        
+        // Remove creation mode class
+        this.canvas.classList.remove('creating-connection');
     }
     
     // Create a connection between two nodes
-    createConnection(sourceId, targetId, targetPosition, label) {
+    createConnection(sourceId, targetId, sourcePosition, targetPosition, label) {
         if (sourceId === targetId) return;
         
         // Find source and target nodes
@@ -363,9 +504,15 @@ class FlowChartApp {
         
         if (!sourceNode || !targetNode) return;
         
-        // Calculate connection points
-        const sourceRect = sourceNode.getBoundingClientRect();
-        const targetRect = targetNode.getBoundingClientRect();
+        // Get the exact connector elements
+        const sourceConnector = sourceNode.querySelector(`.connector[data-position="${sourcePosition}"]`);
+        const targetConnector = targetNode.querySelector(`.connector[data-position="${targetPosition}"]`);
+        
+        if (!sourceConnector || !targetConnector) return;
+        
+        // Calculate connection points based on connector positions
+        const sourceRect = sourceConnector.getBoundingClientRect();
+        const targetRect = targetConnector.getBoundingClientRect();
         const canvasRect = this.canvas.getBoundingClientRect();
         
         const sourceX = (sourceRect.left + sourceRect.width / 2 - canvasRect.left) / this.scale;
@@ -378,19 +525,30 @@ class FlowChartApp {
         path.setAttribute('class', 'connection-line');
         path.dataset.sourceId = sourceId;
         path.dataset.targetId = targetId;
+        path.dataset.sourcePosition = sourcePosition;
+        path.dataset.targetPosition = targetPosition;
         path.dataset.id = this.nextConnectionId++;
         
-        // Calculate control points for a curved path
-        const dx = Math.abs(targetX - sourceX);
-        const dy = Math.abs(targetY - sourceY);
-        const controlOffset = Math.min(100, Math.max(50, Math.min(dx, dy) * 0.5));
-        
-        const pathData = `M ${sourceX},${sourceY} 
-                         C ${sourceX + controlOffset},${sourceY} 
-                           ${targetX - controlOffset},${targetY} 
-                           ${targetX},${targetY}`;
+        // Calculate curve based on connector positions
+        const pathData = this.calculateConnectionPath(
+            sourceX, sourceY, targetX, targetY,
+            sourcePosition, targetPosition
+        );
         
         path.setAttribute('d', pathData);
+        path.style.pointerEvents = 'auto'; // Make path selectable
+        
+        // Add click event for selecting the path
+        path.addEventListener('click', (e) => {
+            if (this.isEditing || this.isCreatingConnection) return;
+            
+            e.stopPropagation();
+            this.deselectAll();
+            this.selectedElement = path;
+            path.classList.add('selected');
+            this.updatePropertiesPanel();
+        });
+        
         this.svg.appendChild(path);
         
         // Add connection label if provided
@@ -401,6 +559,7 @@ class FlowChartApp {
             id: path.dataset.id,
             sourceId: sourceId,
             targetId: targetId,
+            sourcePosition: sourcePosition,
             targetPosition: targetPosition,
             label: connectionLabel
         });
@@ -410,12 +569,66 @@ class FlowChartApp {
             this.addConnectionLabel(path.dataset.id, connectionLabel);
         }
         
-        // Exit connection mode after creating a connection
-        if (this.isConnecting) {
-            this.toggleConnectionMode();
+        return path;
+    }
+    
+    // Calculate path data for a connection based on connector positions
+    calculateConnectionPath(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition) {
+        const dx = Math.abs(targetX - sourceX);
+        const dy = Math.abs(targetY - sourceY);
+        const defaultControlOffset = Math.min(80, Math.max(40, Math.min(dx, dy) * 0.5));
+        
+        let sourceControlX, sourceControlY, targetControlX, targetControlY;
+        
+        // Set control points based on connector positions
+        switch (sourcePosition) {
+            case 'right':
+                sourceControlX = sourceX + defaultControlOffset;
+                sourceControlY = sourceY;
+                break;
+            case 'left':
+                sourceControlX = sourceX - defaultControlOffset;
+                sourceControlY = sourceY;
+                break;
+            case 'bottom':
+                sourceControlX = sourceX;
+                sourceControlY = sourceY + defaultControlOffset;
+                break;
+            case 'top':
+                sourceControlX = sourceX;
+                sourceControlY = sourceY - defaultControlOffset;
+                break;
+            default:
+                sourceControlX = sourceX + defaultControlOffset;
+                sourceControlY = sourceY;
         }
         
-        return path;
+        switch (targetPosition) {
+            case 'right':
+                targetControlX = targetX + defaultControlOffset;
+                targetControlY = targetY;
+                break;
+            case 'left':
+                targetControlX = targetX - defaultControlOffset;
+                targetControlY = targetY;
+                break;
+            case 'bottom':
+                targetControlX = targetX;
+                targetControlY = targetY + defaultControlOffset;
+                break;
+            case 'top':
+                targetControlX = targetX;
+                targetControlY = targetY - defaultControlOffset;
+                break;
+            default:
+                targetControlX = targetX - defaultControlOffset;
+                targetControlY = targetY;
+        }
+        
+        return `M ${sourceX},${sourceY} 
+                C ${sourceControlX},${sourceControlY} 
+                  ${targetControlX},${targetControlY} 
+                  ${targetX},${targetY}`;
     }
     
     // Add a label to a connection
@@ -514,8 +727,15 @@ class FlowChartApp {
             
             if (!path || !sourceNode || !targetNode) return;
             
-            const sourceRect = sourceNode.getBoundingClientRect();
-            const targetRect = targetNode.getBoundingClientRect();
+            // Get the specific connectors
+            const sourceConnector = sourceNode.querySelector(`.connector[data-position="${conn.sourcePosition}"]`);
+            const targetConnector = targetNode.querySelector(`.connector[data-position="${conn.targetPosition}"]`);
+            
+            if (!sourceConnector || !targetConnector) return;
+            
+            // Calculate connection points based on connector positions
+            const sourceRect = sourceConnector.getBoundingClientRect();
+            const targetRect = targetConnector.getBoundingClientRect();
             const canvasRect = this.canvas.getBoundingClientRect();
             
             const sourceX = (sourceRect.left + sourceRect.width / 2 - canvasRect.left) / this.scale;
@@ -523,15 +743,11 @@ class FlowChartApp {
             const targetX = (targetRect.left + targetRect.width / 2 - canvasRect.left) / this.scale;
             const targetY = (targetRect.top + targetRect.height / 2 - canvasRect.top) / this.scale;
             
-            // Calculate control points for a curved path
-            const dx = Math.abs(targetX - sourceX);
-            const dy = Math.abs(targetY - sourceY);
-            const controlOffset = Math.min(100, Math.max(50, Math.min(dx, dy) * 0.5));
-            
-            const pathData = `M ${sourceX},${sourceY} 
-                             C ${sourceX + controlOffset},${sourceY} 
-                               ${targetX - controlOffset},${targetY} 
-                               ${targetX},${targetY}`;
+            // Update the path with the new connector positions
+            const pathData = this.calculateConnectionPath(
+                sourceX, sourceY, targetX, targetY,
+                conn.sourcePosition, conn.targetPosition
+            );
             
             path.setAttribute('d', pathData);
             
@@ -703,8 +919,17 @@ class FlowChartApp {
                 
                 // Import connections
                 data.connections.forEach(conn => {
-                    const path = this.createConnection(conn.sourceId, conn.targetId, conn.targetPosition, conn.label);
-                    path.dataset.id = conn.id;
+                    const path = this.createConnection(
+                        conn.sourceId, 
+                        conn.targetId, 
+                        conn.sourcePosition || 'right', // Default for backward compatibility
+                        conn.targetPosition || 'left',  // Default for backward compatibility
+                        conn.label
+                    );
+                    
+                    if (path) {
+                        path.dataset.id = conn.id;
+                    }
                 });
                 
                 // Update counters
@@ -739,8 +964,8 @@ class FlowChartApp {
             if (target.classList.contains('flow-node') || target.closest('.flow-node')) {
                 const nodeElement = target.closest('.flow-node') || target;
                 this.showNodeContextMenu(e, nodeElement);
-            } else if (target.classList.contains('connection-label')) {
-                const connectionId = target.dataset.connectionId;
+            } else if (target.classList.contains('connection-line') || target.classList.contains('connection-label')) {
+                const connectionId = target.dataset.id || target.dataset.connectionId;
                 this.showConnectionContextMenu(e, connectionId);
             }
             return;
@@ -748,43 +973,35 @@ class FlowChartApp {
         
         // Left-click
         if (e.button === 0) {
+            // Check if clicked on a connection line
+            if (target.classList.contains('connection-line')) {
+                this.deselectAll();
+                target.classList.add('selected');
+                this.selectedElement = target;
+                this.updatePropertiesPanel();
+                return;
+            }
+            
+            // Check if clicked on a connector, which is handled by the connector's own mousedown
+            if (target.classList.contains('connector')) {
+                return;
+            }
+            
             // Handle node selection and dragging
             if (target.classList.contains('flow-node') || target.closest('.flow-node')) {
                 const nodeElement = target.closest('.flow-node') || target;
                 
-                // If in connection mode, start a connection
-                if (this.isConnecting) {
-                    this.sourceNode = nodeElement.dataset.id;
-                    
-                    // Create a temporary line for visual feedback
-                    this.connectingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                    this.connectingLine.setAttribute('class', 'connection-line');
-                    this.connectingLine.style.strokeDasharray = '5,5';
-                    this.svg.appendChild(this.connectingLine);
-                } else {
-                    // Regular node selection - always select the node when clicked
-                    this.deselectAll();
-                    nodeElement.classList.add('selected');
-                    this.selectedElement = nodeElement;
-                    this.updatePropertiesPanel();
-                    
-                    // Prepare for dragging
-                    this.isDragging = true;
-                    const rect = nodeElement.getBoundingClientRect();
-                    this.dragOffsetX = e.clientX - rect.left;
-                    this.dragOffsetY = e.clientY - rect.top;
-                }
-            } else if (target.classList.contains('connector') && this.isConnecting) {
-                // Clicked on a connector in connection mode
-                const nodeElement = target.closest('.flow-node');
-                this.sourceNode = nodeElement.dataset.id;
-                this.sourceConnector = target.dataset.position;
+                // Regular node selection - always select the node when clicked
+                this.deselectAll();
+                nodeElement.classList.add('selected');
+                this.selectedElement = nodeElement;
+                this.updatePropertiesPanel();
                 
-                // Create a temporary line for visual feedback
-                this.connectingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                this.connectingLine.setAttribute('class', 'connection-line');
-                this.connectingLine.style.strokeDasharray = '5,5';
-                this.svg.appendChild(this.connectingLine);
+                // Prepare for dragging
+                this.isDragging = true;
+                const rect = nodeElement.getBoundingClientRect();
+                this.dragOffsetX = e.clientX - rect.left;
+                this.dragOffsetY = e.clientY - rect.top;
             } else {
                 // Clicked on empty canvas
                 this.deselectAll();
@@ -795,34 +1012,14 @@ class FlowChartApp {
     
     // Handle mouse move on canvas
     handleCanvasMouseMove(e) {
-        this.mouseX = e.clientX;
-        this.mouseY = e.clientY;
-        
-        // Update connecting line if in connection mode
-        if (this.isConnecting && this.connectingLine && this.sourceNode) {
-            const sourceNode = this.findNodeElement(this.sourceNode);
-            if (!sourceNode) return;
-            
-            const sourceRect = sourceNode.getBoundingClientRect();
+        // Handle connection creation drag
+        if (this.isCreatingConnection) {
             const canvasRect = this.canvas.getBoundingClientRect();
+            const mouseX = (e.clientX - canvasRect.left) / this.scale;
+            const mouseY = (e.clientY - canvasRect.top) / this.scale;
             
-            const sourceX = (sourceRect.left + sourceRect.width / 2 - canvasRect.left) / this.scale;
-            const sourceY = (sourceRect.top + sourceRect.height / 2 - canvasRect.top) / this.scale;
-            
-            const targetX = (e.clientX - canvasRect.left) / this.scale;
-            const targetY = (e.clientY - canvasRect.top) / this.scale;
-            
-            // Calculate control points for a curved path
-            const dx = Math.abs(targetX - sourceX);
-            const dy = Math.abs(targetY - sourceY);
-            const controlOffset = Math.min(100, Math.max(50, Math.min(dx, dy) * 0.5));
-            
-            const pathData = `M ${sourceX},${sourceY} 
-                             C ${sourceX + controlOffset},${sourceY} 
-                               ${targetX - controlOffset},${targetY} 
-                               ${targetX},${targetY}`;
-            
-            this.connectingLine.setAttribute('d', pathData);
+            this.updateTempConnection(mouseX, mouseY);
+            return;
         }
         
         // Handle node dragging
@@ -867,13 +1064,12 @@ class FlowChartApp {
     }
     
     // Handle mouse up on canvas
-    handleCanvasMouseUp() {
+    handleCanvasMouseUp(e) {
         this.isDragging = false;
         
-        // Clean up connecting line if needed
-        if (this.isConnecting && this.connectingLine) {
-            this.connectingLine.remove();
-            this.connectingLine = null;
+        // Handle connection creation
+        if (this.isCreatingConnection) {
+            this.endConnectionDrag(e);
         }
     }
     
@@ -901,6 +1097,7 @@ class FlowChartApp {
         
         this.selectedElement = connection;
         this.deselectAll();
+        connection.classList.add('selected');
         
         const rect = this.canvas.getBoundingClientRect();
         this.connectionContextMenu.style.left = `${e.clientX - rect.left}px`;
@@ -931,14 +1128,19 @@ class FlowChartApp {
                 break;
                 
             case 'start-connection':
-                this.toggleConnectionMode();
-                this.sourceNode = nodeId;
-                
-                // Create a temporary line for visual feedback
-                this.connectingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                this.connectingLine.setAttribute('class', 'connection-line');
-                this.connectingLine.style.strokeDasharray = '5,5';
-                this.svg.appendChild(this.connectingLine);
+                const nodeElement = this.findNodeElement(nodeId);
+                if (nodeElement) {
+                    // Default to right connector
+                    const connector = nodeElement.querySelector('.connector[data-position="right"]');
+                    if (connector) {
+                        const rect = connector.getBoundingClientRect();
+                        const fakeEvent = {
+                            clientX: rect.left + rect.width / 2,
+                            clientY: rect.top + rect.height / 2
+                        };
+                        this.startConnectionDrag(nodeId, 'right', fakeEvent);
+                    }
+                }
                 break;
         }
         
@@ -963,6 +1165,25 @@ class FlowChartApp {
                         view: window
                     });
                     label.dispatchEvent(dblClickEvent);
+                } else {
+                    // If no label exists, create one with empty text
+                    const connectionData = this.connections.find(c => c.id === connectionId);
+                    if (connectionData) {
+                        this.addConnectionLabel(connectionId, '');
+                        
+                        // Immediately trigger edit mode
+                        setTimeout(() => {
+                            const newLabel = document.querySelector(`.connection-label[data-connection-id="${connectionId}"]`);
+                            if (newLabel) {
+                                const dblClickEvent = new MouseEvent('dblclick', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window
+                                });
+                                newLabel.dispatchEvent(dblClickEvent);
+                            }
+                        }, 10);
+                    }
                 }
                 break;
                 
@@ -1105,8 +1326,8 @@ class FlowChartApp {
     
     // Deselect all elements
     deselectAll() {
-        document.querySelectorAll('.flow-node.selected').forEach(node => {
-            node.classList.remove('selected');
+        document.querySelectorAll('.flow-node.selected, .connection-line.selected').forEach(element => {
+            element.classList.remove('selected');
         });
     }
     
