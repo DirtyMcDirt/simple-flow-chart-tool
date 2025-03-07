@@ -444,6 +444,25 @@ body {
     transform: scale(0.95);
 }
 
+/* Help text styling */
+.help-text {
+    font-size: 12px;
+    line-height: 1.4;
+    color: #666;
+    background-color: #f9f9f9;
+    padding: 10px;
+    border-radius: 4px;
+    border-left: 3px solid var(--primary-color);
+}
+
+.help-text p {
+    margin-bottom: 5px;
+}
+
+.help-text strong {
+    color: #333;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .app-container {
@@ -483,11 +502,17 @@ body {
     text-align: center;
     color: #aaa;
     pointer-events: none;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    z-index: 0;
 }
 
 .canvas-empty-state h3 {
     font-size: 1.5rem;
     margin-bottom: 1rem;
+    color: #666;
 }
 
 .canvas-empty-state p {
@@ -519,33 +544,6 @@ body {
     font-style: italic;
     text-align: center;
     padding: 20px 0;
-}
-
-/* Better canvas indicators */
-#canvas {
-    position: relative;
-}
-
-#canvas::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    pointer-events: none;
-    z-index: 0;
-}
-
-/* Animations */
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-}
-
-.connector-highlight {
-    animation: pulse 1s infinite;
 }
 
 /* Fix z-index ordering */
